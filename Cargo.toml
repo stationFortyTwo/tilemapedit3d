@@ -1,0 +1,16 @@
+[package]
+name = "dprmapedit"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = { version = "0.14", features = ["serialize", "exr"] }   # use latest stable if newer
+bevy_egui = "0.28.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1.0.100"
+bincode = "2.0.1"
+bytemuck = "1.23.2"  # or "ron" if you prefer
+rfd = "0.14"
+image = { version = "0.25", default-features = false, features = ["png"] }
+zip = { version = "0.6", default-features = false, features = ["deflate"] }

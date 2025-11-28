@@ -34,8 +34,23 @@ We welcome contributions! A concise workflow:
 
 Use the checklist placeholders below when recording upcoming tasks:
 
+- [ ] Allow adding new tiles (not just editing existing ones) so the overall map can grow or shrink.
+- [ ] Enable importing custom textures without modifying source code.
+- [ ] Support user/org-specific utilities (e.g., scenario triggers, spawn points, neutrals, or other hooks).
 - [ ] (add item)
 - [ ] (add item)
+
+## Current caveats
+
+- The splatmap is limited to four channels (`Rgba8Unorm`), so painting with more than four textures can produce unexpected blends. Extending this to more layers is a stretch goal that will require reworking texture allocation across the map. The current splatmap generation lives in `src/terrain.rs` under `splatmap` functions and is bound in `src/runtime.rs` when the terrain mesh is refreshed.
+- Roughness maps are loaded and sampled in the terrain shader, but their results have not been fully verified yet. See the roughness accumulation paths in `assets/shaders/terrain_pbr_extension.wgsl` for the current implementation.
+- Only a single cliff texture (wall layer) is supported right now. Extending wall variety is planned once a preferred approach is chosen.
+
+## How the splatmap works
+
+1. **Generation** — The CPU builds the `Rgba8Unorm` splatmap from the map grid in `src/terrain.rs` (`splatmap::create` and `splatmap::write`), assigning one channel per `TileType` index. The runtime registers the resulting texture handle in `src/runtime.rs` so the renderer can sample it when rebuilding terrain meshes.
+2. **Sampling in the shader** — The fragment shader converts world space to splat UVs in `world_to_splat_uv`, samples the splat texture (`textureSampleLevel`) around each tile to derive normalized weights, and falls back to vertex UVs if no weights are present. This logic lives in `assets/shaders/terrain_pbr_extension.wgsl` near the weight normalization loop (see the section where `weights` is divided by `weight_total`).
+3. **Applying layers and cliffs** — The same shader triplanar-samples base color, normals, and roughness for each weighted layer. Cliff handling happens later in the file around the computation of `cliff_weight`: when cliffs are enabled it uses `wall_layer_index` for the cliff sample; otherwise it reuses the top layer. Blending between cliff, top, and optional bottom layers is done in that block before the final PBR lighting call.
 
 ## Additional tips
 

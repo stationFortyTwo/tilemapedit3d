@@ -37,8 +37,6 @@ Use the checklist placeholders below when recording upcoming tasks:
 - [ ] Allow adding new tiles (not just editing existing ones) so the overall map can grow or shrink.
 - [ ] Enable importing custom textures without modifying source code.
 - [ ] Support user/org-specific utilities (e.g., scenario triggers, spawn points, neutrals, or other hooks).
-- [ ] (add item)
-- [ ] (add item)
 
 ## Current caveats
 

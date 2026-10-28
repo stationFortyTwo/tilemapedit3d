@@ -1,0 +1,40 @@
+{
+  "name": "fixture",
+  "width": 4,
+  "height": 3,
+  "tile_size": 2.0,
+  "textures": [
+    {
+      "id": "grass",
+      "diffuse": "textures/grass_diffuse.png",
+      "normal": "textures/grass_normal.exr",
+      "roughness": "textures/grass_roughness.png",
+      "splatmap_channel": 0
+    },
+    {
+      "id": "dirt",
+      "diffuse": "textures/dirt_diffuse.png",
+      "roughness": "textures/dirt_roughness.png",
+      "splatmap_channel": 1
+    },
+    {
+      "id": "sand",
+      "diffuse": "textures/sand_diffuse.png",
+      "normal": "textures/sand_normal.exr",
+      "splatmap_channel": 2
+    },
+    {
+      "id": "rock",
+      "diffuse": "textures/rock_diffuse.png",
+      "splatmap_channel": 3
+    }
+  ],
+  "splatmap": "splatmap.png",
+  "mesh": "mesh.glb",
+  "tilemap": "tilemap.json",
+  "wall_texture": {
+    "id": "wall",
+    "diffuse": "textures/wall_diffuse.png",
+    "normal": "textures/wall_normal.exr"
+  }
+}

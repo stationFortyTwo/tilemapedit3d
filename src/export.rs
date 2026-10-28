@@ -718,3 +718,194 @@ fn bounds_vec3(values: &[[f32; 3]]) -> ([f32; 3], [f32; 3]) {
     }
     (min, max)
 }
+
+/// Pins the export format byte-for-byte. The goldens under
+/// `tests/golden/export/` were produced by this test before the Bevy 0.14 →
+/// 0.20 upgrade; any change to the archive a game reads fails here.
+/// Re-bless deliberately with `TILEMAPEDIT_BLESS=1 cargo test`.
+#[cfg(test)]
+mod golden_tests {
+    use std::io::Read;
+    use std::path::{Path, PathBuf};
+
+    use super::*;
+    use crate::types::{RampDirection, Tile, TileKind};
+
+    fn golden_dir() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/export")
+    }
+
+    fn scratch_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("tilemapedit3d-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn put(
+        map: &mut TileMap,
+        x: u32,
+        y: u32,
+        kind: TileKind,
+        tile_type: TileType,
+        elevation: i8,
+        ramp_direction: Option<RampDirection>,
+    ) {
+        // Touched tiles carry their coordinates, as the editor's paint tool writes them.
+        map.set(
+            x,
+            y,
+            Tile {
+                kind,
+                tile_type,
+                x,
+                y,
+                elevation,
+                ramp_direction,
+            },
+        );
+    }
+
+    /// 4×3: a raised plateau, a rotated ramp (explicit downhill direction), a
+    /// direction-less ramp, a sunken tile and untouched tiles left at (0, 0).
+    fn fixture_map() -> TileMap {
+        let mut map = TileMap::new(4, 3);
+        put(&mut map, 2, 0, TileKind::Floor, TileType::Dirt, 1, None);
+        put(&mut map, 3, 0, TileKind::Floor, TileType::Dirt, 1, None);
+        put(
+            &mut map,
+            1,
+            1,
+            TileKind::Ramp,
+            TileType::Rock,
+            1,
+            Some(RampDirection::West),
+        );
+        put(&mut map, 2, 1, TileKind::Floor, TileType::Dirt, 1, None);
+        put(&mut map, 3, 1, TileKind::Ramp, TileType::Rock, 2, None);
+        put(&mut map, 2, 2, TileKind::Floor, TileType::Sand, -1, None);
+        map
+    }
+
+    fn texture_file(dir: &Path, name: &str) -> TextureFileDescriptor {
+        let path = dir.join(name);
+        std::fs::write(&path, format!("texture:{name}")).unwrap();
+        TextureFileDescriptor { source_path: path }
+    }
+
+    fn fixture_textures(
+        dir: &Path,
+    ) -> (
+        Vec<TextureExportDescriptor>,
+        Option<WallTextureExportDescriptor>,
+    ) {
+        let floor = |tile_type: TileType, normal: bool, roughness: bool| {
+            let id = tile_type.identifier();
+            TextureExportDescriptor {
+                tile_type,
+                identifier: id.to_string(),
+                diffuse: texture_file(dir, &format!("{id}_d.png")),
+                normal: normal.then(|| texture_file(dir, &format!("{id}_n.exr"))),
+                roughness: roughness.then(|| texture_file(dir, &format!("{id}_r.png"))),
+            }
+        };
+        let textures = vec![
+            floor(TileType::Grass, true, true),
+            floor(TileType::Dirt, false, true),
+            floor(TileType::Sand, true, false),
+            floor(TileType::Rock, false, false),
+        ];
+        let wall = WallTextureExportDescriptor {
+            identifier: "wall".to_string(),
+            diffuse: texture_file(dir, "wall_d.png"),
+            normal: Some(texture_file(dir, "wall_n.exr")),
+            roughness: None,
+        };
+        (textures, Some(wall))
+    }
+
+    /// Runs the editor's real export path and returns every artefact it
+    /// produced, named as the goldens are.
+    fn export_fixture() -> Vec<(String, Vec<u8>)> {
+        let dir = scratch_dir("export");
+        let map = fixture_map();
+        let (textures, wall) = fixture_textures(&dir);
+        let splat_png = build_map_splatmap_png(&map).unwrap();
+        let archive_path = dir.join("fixture.tmemapdata");
+        export_package(
+            &archive_path,
+            map.clone(),
+            "fixture".to_string(),
+            textures,
+            wall,
+            splat_png,
+        )
+        .unwrap();
+
+        let archive_bytes = std::fs::read(&archive_path).unwrap();
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(archive_bytes.clone())).unwrap();
+        let mut names = String::new();
+        let mut out = Vec::new();
+        for i in 0..zip.len() {
+            let mut entry = zip.by_index(i).unwrap();
+            names.push_str(entry.name());
+            names.push('\n');
+            if entry.is_file() {
+                let mut bytes = Vec::new();
+                entry.read_to_end(&mut bytes).unwrap();
+                out.push((format!("entry/{}", entry.name()), bytes));
+            }
+        }
+        out.push(("entries.txt".to_string(), names.into_bytes()));
+        out.push(("fixture.tmemapdata".to_string(), archive_bytes));
+
+        let project = dir.join("fixture.map");
+        crate::io::save_map(&project, &map).unwrap();
+        out.push(("project.map".to_string(), std::fs::read(&project).unwrap()));
+
+        let _ = std::fs::remove_dir_all(&dir);
+        out
+    }
+
+    #[test]
+    fn export_matches_pre_upgrade_golden_bytes() {
+        let bless = std::env::var_os("TILEMAPEDIT_BLESS").is_some();
+        let golden = golden_dir();
+        let mut mismatches = Vec::new();
+        for (name, bytes) in export_fixture() {
+            let path = golden.join(&name);
+            if bless {
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(&path, &bytes).unwrap();
+                continue;
+            }
+            let expected = std::fs::read(&path)
+                .unwrap_or_else(|err| panic!("missing golden {}: {err}", path.display()));
+            if expected != bytes {
+                mismatches.push(format!(
+                    "{name} ({} bytes, golden {} bytes)",
+                    bytes.len(),
+                    expected.len()
+                ));
+            }
+        }
+        assert!(
+            mismatches.is_empty(),
+            "export drifted from golden: {mismatches:#?}"
+        );
+    }
+
+    #[test]
+    fn project_file_round_trips() {
+        let dir = scratch_dir("roundtrip");
+        let map = fixture_map();
+        let path = dir.join("fixture.map");
+        crate::io::save_map(&path, &map).unwrap();
+        let loaded = crate::io::load_map(&path).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            serde_json::to_vec(&loaded).unwrap(),
+            serde_json::to_vec(&map).unwrap()
+        );
+    }
+}

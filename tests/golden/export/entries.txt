@@ -1,0 +1,15 @@
+tilemap.json
+mesh.glb
+splatmap.png
+metadata.json
+textures/
+textures/grass_diffuse.png
+textures/grass_normal.exr
+textures/grass_roughness.png
+textures/dirt_diffuse.png
+textures/dirt_roughness.png
+textures/sand_diffuse.png
+textures/sand_normal.exr
+textures/rock_diffuse.png
+textures/wall_diffuse.png
+textures/wall_normal.exr

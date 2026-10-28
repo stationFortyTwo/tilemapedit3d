@@ -3,8 +3,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
-use bevy::render::mesh::{Indices, Mesh, VertexAttributeValues};
-use bevy::render::texture::Image;
+use bevy::image::Image;
+use bevy::mesh::{Indices, Mesh, MeshVertexAttribute, VertexAttributeValues};
 use image::codecs::png::PngEncoder;
 use image::{ColorType, ExtendedColorType, ImageEncoder};
 use serde::Serialize;
@@ -382,13 +382,12 @@ pub fn encode_splatmap_png(image: &Image) -> Result<Vec<u8>> {
 
     let width = image.texture_descriptor.size.width;
     let height = image.texture_descriptor.size.height;
+    let data = image
+        .data
+        .as_deref()
+        .ok_or_else(|| anyhow!("Splatmap has no CPU-side pixel data to export"))?;
     let mut buffer = Vec::new();
-    PngEncoder::new(&mut buffer).write_image(
-        &image.data,
-        width,
-        height,
-        ExtendedColorType::Rgba8,
-    )?;
+    PngEncoder::new(&mut buffer).write_image(data, width, height, ExtendedColorType::Rgba8)?;
     Ok(buffer)
 }
 
@@ -511,11 +510,7 @@ fn pad_to_four(buffer: &mut Vec<u8>, pad: u8) {
     }
 }
 
-fn extract_vec3(
-    mesh: &Mesh,
-    attribute: bevy::render::mesh::MeshVertexAttribute,
-    name: &str,
-) -> Result<Vec<[f32; 3]>> {
+fn extract_vec3(mesh: &Mesh, attribute: MeshVertexAttribute, name: &str) -> Result<Vec<[f32; 3]>> {
     let values = mesh
         .attribute(attribute)
         .ok_or_else(|| anyhow!("Mesh missing {name} attribute"))?;
@@ -525,11 +520,7 @@ fn extract_vec3(
     }
 }
 
-fn extract_vec2(
-    mesh: &Mesh,
-    attribute: bevy::render::mesh::MeshVertexAttribute,
-    name: &str,
-) -> Result<Vec<[f32; 2]>> {
+fn extract_vec2(mesh: &Mesh, attribute: MeshVertexAttribute, name: &str) -> Result<Vec<[f32; 2]>> {
     let values = mesh
         .attribute(attribute)
         .ok_or_else(|| anyhow!("Mesh missing {name} attribute"))?;
@@ -541,7 +532,7 @@ fn extract_vec2(
 
 fn extract_optional_vec2(
     mesh: &Mesh,
-    attribute: bevy::render::mesh::MeshVertexAttribute,
+    attribute: MeshVertexAttribute,
 ) -> Result<Option<Vec<[f32; 2]>>> {
     let Some(values) = mesh.attribute(attribute) else {
         return Ok(None);
@@ -554,7 +545,7 @@ fn extract_optional_vec2(
 
 fn extract_optional_vec4(
     mesh: &Mesh,
-    attribute: bevy::render::mesh::MeshVertexAttribute,
+    attribute: MeshVertexAttribute,
 ) -> Result<Option<Vec<[f32; 4]>>> {
     let Some(values) = mesh.attribute(attribute) else {
         return Ok(None);

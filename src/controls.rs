@@ -12,18 +12,23 @@ impl Plugin for ControlsPlugin {
 fn camera_move(
     mut q_cam: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
     keys: Res<ButtonInput<KeyCode>>,
-    mut scroll: EventReader<MouseWheel>,
+    mut scroll: MessageReader<MouseWheel>,
     mut egui: EguiContexts,
     time: Res<Time>,
 ) {
-    if egui.ctx_mut().wants_pointer_input() || egui.ctx_mut().wants_keyboard_input() {
+    if egui
+        .ctx_mut()
+        .is_ok_and(|ctx| ctx.egui_wants_pointer_input() || ctx.egui_wants_keyboard_input())
+    {
         return;
     }
 
-    let (mut t, mut proj) = q_cam.single_mut();
+    let Ok((mut t, mut proj)) = q_cam.single_mut() else {
+        return;
+    };
 
     // movement
-    let f: f32 = 20.0 * time.delta_seconds();
+    let f: f32 = 20.0 * time.delta_secs();
 
     // Convert to Vec3 so we can modify
     let mut forward: Vec3 = t.forward().into();

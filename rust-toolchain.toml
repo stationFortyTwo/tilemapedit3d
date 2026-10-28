@@ -1,0 +1,5 @@
+# Bevy 0.20 needs rustc 1.97.1 (its `rust-version`). Pinned so a standalone
+# checkout does not fail with an MSRV error on an older default toolchain.
+[toolchain]
+channel = "1.97.1"
+components = ["clippy", "rustfmt"]

@@ -15,14 +15,14 @@ fn spawn_camera(mut commands: Commands) {
         * Quat::from_rotation_x(-35.264_f32.to_radians());
     const MIN_SCALE: f32 = 0.02;
 
-    commands.spawn((Camera3dBundle {
+    commands.spawn((
+        Camera3d::default(),
         transform,
-        projection: Projection::Orthographic(OrthographicProjection {
+        Projection::Orthographic(OrthographicProjection {
             scale: MIN_SCALE,
             near: -500.0,
             far: 500.0,
-            ..default()
+            ..OrthographicProjection::default_3d()
         }),
-        ..default()
-    },));
+    ));
 }

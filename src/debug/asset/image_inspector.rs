@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat as F;
-use bevy::render::texture::Image;
 
 pub struct ImageInspectorPlugin;
 
@@ -12,7 +11,7 @@ impl Plugin for ImageInspectorPlugin {
 
 fn inspect_loaded_images(
     assets: Res<Assets<Image>>,
-    mut events: EventReader<AssetEvent<Image>>,
+    mut events: MessageReader<AssetEvent<Image>>,
     asset_server: Res<AssetServer>,
 ) {
     for event in events.read() {
@@ -41,7 +40,8 @@ fn inspect_loaded_images(
                     info!("is_srgb: {}", srgb);
 
                     // preview a few bytes
-                    let bytes = &image.data[..16.min(image.data.len())];
+                    let data = image.data.as_deref().unwrap_or_default();
+                    let bytes = &data[..16.min(data.len())];
                     info!("First few bytes: {:?}", bytes);
 
                     log_channel_ranges(&path_str, image);
@@ -60,7 +60,7 @@ fn log_channel_ranges(path: &str, image: &Image) {
         let (mut gmin, mut gmax) = (u8::MAX, 0u8);
         let (mut bmin, mut bmax) = (u8::MAX, 0u8);
 
-        for px in image.data.chunks_exact(4) {
+        for px in image.data.as_deref().unwrap_or_default().chunks_exact(4) {
             let (r, g, b) = (px[0], px[1], px[2]);
             rmin = rmin.min(r);
             rmax = rmax.max(r);

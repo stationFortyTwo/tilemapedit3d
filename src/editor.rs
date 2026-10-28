@@ -2,7 +2,6 @@ use crate::terrain;
 use crate::texture::material::TerrainMaterial;
 use crate::texture::registry::TerrainTextureRegistry;
 use crate::types::*;
-use bevy::pbr::MaterialMeshBundle;
 use bevy::prelude::*;
 use bevy::tasks::Task;
 use bevy_egui::EguiContexts;
@@ -181,13 +180,10 @@ fn spawn_editor_assets(
         let tile_type = entry.tile_type;
         let mesh = meshes.add(terrain::empty_mesh());
         commands.spawn((
-            MaterialMeshBundle {
-                mesh: mesh.clone(),
-                material: entry.material.clone(),
-                transform: Transform::default(),
-                visibility: Visibility::Hidden,
-                ..default()
-            },
+            Mesh3d(mesh.clone()),
+            MeshMaterial3d(entry.material.clone()),
+            Transform::default(),
+            Visibility::Hidden,
             Name::new(format!("EditorTerrain::{tile_type:?}")),
         ));
 
@@ -204,10 +200,15 @@ fn update_hover(
     cameras: Query<(&Camera, &GlobalTransform)>,
     mut egui: EguiContexts,
 ) {
-    let (cam, cam_xform) = cameras.single();
-    let win = windows.single();
+    let (Ok((cam, cam_xform)), Ok(win)) = (cameras.single(), windows.single()) else {
+        state.hover = None;
+        return;
+    };
 
-    if egui.ctx_mut().wants_pointer_input() {
+    if egui
+        .ctx_mut()
+        .is_ok_and(|ctx| ctx.egui_wants_pointer_input())
+    {
         state.hover = None;
         return;
     }
@@ -217,7 +218,7 @@ fn update_hover(
         return;
     };
 
-    if let Some(ray) = cam.viewport_to_world(cam_xform, cursor) {
+    if let Ok(ray) = cam.viewport_to_world(cam_xform, cursor) {
         // --- Step 1: flat projection (y = 0) candidate
         let guess_hit = ray.origin + ray.direction * ((0.0 - ray.origin.y) / ray.direction.y);
         let tx = (guess_hit.x / TILE_SIZE).floor() as i32;
@@ -257,7 +258,10 @@ fn paint_tiles(
     mut state: ResMut<EditorState>,
     mut egui: EguiContexts,
 ) {
-    if egui.ctx_mut().wants_pointer_input() {
+    if egui
+        .ctx_mut()
+        .is_ok_and(|ctx| ctx.egui_wants_pointer_input())
+    {
         return;
     }
     if state.current_tool != EditorTool::Paint {
@@ -314,7 +318,10 @@ fn rotate_ramps(
     mut state: ResMut<EditorState>,
     mut egui: EguiContexts,
 ) {
-    if egui.ctx_mut().wants_pointer_input() {
+    if egui
+        .ctx_mut()
+        .is_ok_and(|ctx| ctx.egui_wants_pointer_input())
+    {
         return;
     }
     if state.current_tool != EditorTool::RotateRamp {
@@ -399,7 +406,7 @@ fn rebuild_terrain_mesh(
             .cloned()
             .unwrap_or_else(terrain::empty_mesh);
 
-        if let Some(existing) = meshes.get_mut(&layer.mesh) {
+        if let Some(mut existing) = meshes.get_mut(&layer.mesh) {
             *existing = mesh;
         }
     }

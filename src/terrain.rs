@@ -1,15 +1,12 @@
 use std::collections::HashMap;
 
 use crate::types::{RampDirection, TILE_HEIGHT, TILE_SIZE, TileKind, TileMap, TileType};
+use bevy::asset::RenderAssetUsages;
 use bevy::ecs::schedule::SystemSet;
+use bevy::image::{Image, ImageSampler};
+use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
 use bevy::prelude::*;
-use bevy::render::mesh::{Indices, Mesh};
-use bevy::render::render_asset::RenderAssetUsages;
-use bevy::render::render_resource::{
-    AddressMode, FilterMode, PrimitiveTopology, SamplerDescriptor, TextureDimension, TextureFormat,
-    TextureUsages,
-};
-use bevy::render::texture::{Image, ImageSampler};
+use bevy::render::render_resource::{TextureDimension, TextureFormat, TextureUsages};
 
 pub const CORNER_NW: usize = 0;
 pub const CORNER_NE: usize = 1;
@@ -639,9 +636,8 @@ fn should_force_cliff_face(
 
 pub mod splatmap {
     use super::*;
-    use bevy::render::render_asset::RenderAssetUsages;
+    use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSamplerDescriptor};
     use bevy::render::render_resource::Extent3d;
-    use bevy::render::texture::{ImageAddressMode, ImageFilterMode, ImageSamplerDescriptor};
 
     const CHANNELS: usize = 4;
 
@@ -672,12 +668,13 @@ pub mod splatmap {
 
         let width = extent.width as usize;
         let required_len = width * (extent.height as usize) * CHANNELS;
-        if image.data.len() != required_len {
-            image.data.resize(required_len, 0);
+        let data = image.data.get_or_insert_with(Vec::new);
+        if data.len() != required_len {
+            data.resize(required_len, 0);
         }
 
         if map.width == 0 || map.height == 0 {
-            image.data.fill(0);
+            data.fill(0);
             return;
         }
 
@@ -691,7 +688,7 @@ pub mod splatmap {
                 }
 
                 let idx = (y * width + x) * CHANNELS;
-                image.data[idx..idx + CHANNELS].copy_from_slice(&pixel);
+                data[idx..idx + CHANNELS].copy_from_slice(&pixel);
             }
         }
     }

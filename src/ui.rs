@@ -2,12 +2,10 @@ use crate::editor::{EditorTool, ExportStatus};
 use crate::export;
 use crate::io::{load_map, save_map};
 use crate::runtime::RuntimeSplatMap;
-use crate::terrain::TerrainMeshSet;
 use crate::types::*;
 use bevy::prelude::*;
-use bevy::render::texture::Image;
 use bevy::tasks::{IoTaskPool, block_on};
-use bevy_egui::{EguiContexts, egui};
+use bevy_egui::{EguiContexts, EguiPrimaryContextPass, EguiTextureHandle, egui};
 use rfd::AsyncFileDialog;
 use std::path::{Path, PathBuf};
 
@@ -16,7 +14,9 @@ use crate::texture::registry::TerrainTextureRegistry;
 pub struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, ui_panel.before(TerrainMeshSet::Rebuild));
+        // egui UI must be built inside the context's pass. Edits made here are
+        // picked up by the next frame's terrain rebuild in `Update`.
+        app.add_systems(EguiPrimaryContextPass, ui_panel);
     }
 }
 
@@ -32,7 +32,7 @@ fn ui_panel(
         .map(|entry| PaletteItem {
             tile_type: entry.tile_type,
             name: entry.name.clone(),
-            texture: egui_ctx.add_image(entry.preview.clone_weak()),
+            texture: egui_ctx.add_image(EguiTextureHandle::Weak(entry.preview.id())),
         })
         .collect();
 
@@ -45,165 +45,182 @@ fn ui_panel(
         }
     }
 
-    egui::TopBottomPanel::top("toolbar").show(egui_ctx.ctx_mut(), |ui| {
-        ui.horizontal(|ui| {
-            ui.label("Mode:");
-            ui.selectable_value(&mut state.current_tool, EditorTool::Paint, "Paint");
-            ui.selectable_value(
-                &mut state.current_tool,
-                EditorTool::RotateRamp,
-                "Rotate Ramp",
-            );
+    let Ok(ctx) = egui_ctx.ctx_mut() else {
+        return;
+    };
+    let ctx = ctx.clone();
 
-            if state.current_tool == EditorTool::Paint {
-                ui.separator();
-                ui.label("Tile:");
-                ui.selectable_value(&mut state.current_kind, TileKind::Floor, "Floor");
-                ui.selectable_value(&mut state.current_kind, TileKind::Ramp, "Ramp");
-            }
+    // A full-width bar pinned to the top. egui 0.36 dropped context-level
+    // panels; an `Area` keeps the bar hit-testable, so clicks on it are not
+    // treated as clicks on the map.
+    let toolbar_frame = egui::Frame::side_top_panel(&ctx.global_style());
+    let toolbar_width =
+        (ctx.viewport_rect().width() - toolbar_frame.total_margin().sum().x).max(0.0);
+    egui::Area::new(egui::Id::new("toolbar"))
+        .anchor(egui::Align2::LEFT_TOP, egui::Vec2::ZERO)
+        .show(&ctx, |ui| {
+            toolbar_frame.show(ui, |ui| {
+                ui.set_width(toolbar_width);
+                ui.horizontal(|ui| {
+                    ui.label("Mode:");
+                    ui.selectable_value(&mut state.current_tool, EditorTool::Paint, "Paint");
+                    ui.selectable_value(
+                        &mut state.current_tool,
+                        EditorTool::RotateRamp,
+                        "Rotate Ramp",
+                    );
 
-            ui.separator();
-            ui.label("Elevation:");
-            for e in 0..=3 {
-                ui.selectable_value(&mut state.current_elev, e, format!("{e}"));
-            }
-
-            ui.separator();
-            if ui.button("Save…").clicked() && state.save_dialog_task.is_none() {
-                let mut dialog = AsyncFileDialog::new().set_title("Save Map");
-                if let Some(path) = state.current_file_path.as_ref() {
-                    if let Some(parent) = path.parent() {
-                        dialog = dialog.set_directory(parent);
+                    if state.current_tool == EditorTool::Paint {
+                        ui.separator();
+                        ui.label("Tile:");
+                        ui.selectable_value(&mut state.current_kind, TileKind::Floor, "Floor");
+                        ui.selectable_value(&mut state.current_kind, TileKind::Ramp, "Ramp");
                     }
-                    if let Some(file_name) = path.file_name().and_then(|name| name.to_str()) {
-                        dialog = dialog.set_file_name(file_name);
+
+                    ui.separator();
+                    ui.label("Elevation:");
+                    for e in 0..=3 {
+                        ui.selectable_value(&mut state.current_elev, e, format!("{e}"));
                     }
-                }
 
-                state.save_dialog_task = Some(IoTaskPool::get().spawn(async move {
-                    dialog
-                        .save_file()
-                        .await
-                        .map(|file| file.path().to_path_buf())
-                }));
-            }
-            if ui.button("Export…").clicked()
-                && state.export_dialog_task.is_none()
-                && state.export_task.is_none()
-            {
-                let mut dialog = AsyncFileDialog::new().set_title("Export Map");
-                dialog = dialog.add_filter("Tile Map Package", &["tmemapdata"]);
-                if let Some(path) = state.current_file_path.as_ref() {
-                    if let Some(parent) = path.parent() {
-                        dialog = dialog.set_directory(parent);
+                    ui.separator();
+                    if ui.button("Save…").clicked() && state.save_dialog_task.is_none() {
+                        let mut dialog = AsyncFileDialog::new().set_title("Save Map");
+                        if let Some(path) = state.current_file_path.as_ref() {
+                            if let Some(parent) = path.parent() {
+                                dialog = dialog.set_directory(parent);
+                            }
+                            if let Some(file_name) = path.file_name().and_then(|name| name.to_str())
+                            {
+                                dialog = dialog.set_file_name(file_name);
+                            }
+                        }
+
+                        state.save_dialog_task = Some(IoTaskPool::get().spawn(async move {
+                            dialog
+                                .save_file()
+                                .await
+                                .map(|file| file.path().to_path_buf())
+                        }));
                     }
-                    if let Some(stem) = path.file_stem().and_then(|name| name.to_str()) {
-                        dialog = dialog.set_file_name(format!("{stem}.tmemapdata"));
-                    }
-                } else {
-                    dialog = dialog.set_file_name("map.tmemapdata");
-                }
-
-                state.export_dialog_task = Some(IoTaskPool::get().spawn(async move {
-                    dialog
-                        .save_file()
-                        .await
-                        .map(|file| file.path().to_path_buf())
-                }));
-            }
-            if ui.button("Load…").clicked() && state.load_dialog_task.is_none() {
-                let mut dialog = AsyncFileDialog::new().set_title("Open Map");
-                if let Some(path) = state.current_file_path.as_ref() {
-                    if let Some(parent) = path.parent() {
-                        dialog = dialog.set_directory(parent);
-                    }
-                }
-
-                state.load_dialog_task = Some(IoTaskPool::get().spawn(async move {
-                    dialog
-                        .pick_file()
-                        .await
-                        .map(|file| file.path().to_path_buf())
-                }));
-            }
-
-            ui.separator();
-            ui.checkbox(&mut state.show_grid, "Gridlines");
-        });
-
-        if !palette_items.is_empty() {
-            ui.separator();
-            ui.collapsing("Textures", |ui| {
-                const COLUMNS: usize = 4;
-                let grid = egui::Grid::new("texture_palette_grid")
-                    .spacing([6.0, 6.0])
-                    .num_columns(COLUMNS);
-
-                let button_outer_size = egui::Vec2::splat(36.0);
-                let button_inner_size = egui::vec2(32.0, 32.0);
-
-                grid.show(ui, |grid_ui| {
-                    for (index, item) in palette_items.iter().enumerate() {
-                        let is_selected = state.current_texture == item.tile_type;
-                        let stroke = if is_selected {
-                            egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 122, 204))
+                    if ui.button("Export…").clicked()
+                        && state.export_dialog_task.is_none()
+                        && state.export_task.is_none()
+                    {
+                        let mut dialog = AsyncFileDialog::new().set_title("Export Map");
+                        dialog = dialog.add_filter("Tile Map Package", &["tmemapdata"]);
+                        if let Some(path) = state.current_file_path.as_ref() {
+                            if let Some(parent) = path.parent() {
+                                dialog = dialog.set_directory(parent);
+                            }
+                            if let Some(stem) = path.file_stem().and_then(|name| name.to_str()) {
+                                dialog = dialog.set_file_name(format!("{stem}.tmemapdata"));
+                            }
                         } else {
-                            egui::Stroke::NONE
-                        };
-
-                        let response = egui::Frame::none()
-                            .inner_margin(egui::Margin::same(2.0))
-                            .stroke(stroke)
-                            .show(grid_ui, |ui| {
-                                ui.set_min_size(button_outer_size);
-                                ui.set_max_size(button_outer_size);
-                                ui.centered_and_justified(|ui| {
-                                    ui.add(
-                                        egui::ImageButton::new(egui::load::SizedTexture {
-                                            id: item.texture,
-                                            size: button_inner_size,
-                                        })
-                                        .frame(false),
-                                    )
-                                })
-                                .inner
-                            })
-                            .inner;
-
-                        let response = response.on_hover_text(item.name.clone());
-
-                        if response.clicked() {
-                            state.current_texture = item.tile_type;
+                            dialog = dialog.set_file_name("map.tmemapdata");
                         }
 
-                        if index % COLUMNS == COLUMNS - 1 {
-                            grid_ui.end_row();
+                        state.export_dialog_task = Some(IoTaskPool::get().spawn(async move {
+                            dialog
+                                .save_file()
+                                .await
+                                .map(|file| file.path().to_path_buf())
+                        }));
+                    }
+                    if ui.button("Load…").clicked() && state.load_dialog_task.is_none() {
+                        let mut dialog = AsyncFileDialog::new().set_title("Open Map");
+                        if let Some(path) = state.current_file_path.as_ref() {
+                            if let Some(parent) = path.parent() {
+                                dialog = dialog.set_directory(parent);
+                            }
                         }
+
+                        state.load_dialog_task = Some(IoTaskPool::get().spawn(async move {
+                            dialog
+                                .pick_file()
+                                .await
+                                .map(|file| file.path().to_path_buf())
+                        }));
                     }
 
-                    if palette_items.len() % COLUMNS != 0 {
-                        grid_ui.end_row();
-                    }
+                    ui.separator();
+                    ui.checkbox(&mut state.show_grid, "Gridlines");
                 });
-            });
-        }
-        if let Some(path) = state.current_file_path.as_ref() {
-            ui.separator();
-            ui.label(format!("Current map: {}", path.display()));
-        }
 
-        if let Some(status) = state.last_export_status.as_ref() {
-            ui.separator();
-            match status {
-                ExportStatus::Success(message) => {
-                    ui.colored_label(egui::Color32::from_rgb(56, 142, 60), message);
+                if !palette_items.is_empty() {
+                    ui.separator();
+                    ui.collapsing("Textures", |ui| {
+                        const COLUMNS: usize = 4;
+                        let grid = egui::Grid::new("texture_palette_grid")
+                            .spacing([6.0, 6.0])
+                            .num_columns(COLUMNS);
+
+                        let button_outer_size = egui::Vec2::splat(36.0);
+                        let button_inner_size = egui::vec2(32.0, 32.0);
+
+                        grid.show(ui, |grid_ui| {
+                            for (index, item) in palette_items.iter().enumerate() {
+                                let is_selected = state.current_texture == item.tile_type;
+                                let stroke = if is_selected {
+                                    egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 122, 204))
+                                } else {
+                                    egui::Stroke::NONE
+                                };
+
+                                let response = egui::Frame::NONE
+                                    .inner_margin(egui::Margin::same(2))
+                                    .stroke(stroke)
+                                    .show(grid_ui, |ui| {
+                                        ui.set_min_size(button_outer_size);
+                                        ui.set_max_size(button_outer_size);
+                                        ui.centered_and_justified(|ui| {
+                                            ui.add(
+                                                egui::Button::image(egui::load::SizedTexture {
+                                                    id: item.texture,
+                                                    size: button_inner_size,
+                                                })
+                                                .frame(false),
+                                            )
+                                        })
+                                        .inner
+                                    })
+                                    .inner;
+
+                                let response = response.on_hover_text(item.name.clone());
+
+                                if response.clicked() {
+                                    state.current_texture = item.tile_type;
+                                }
+
+                                if index % COLUMNS == COLUMNS - 1 {
+                                    grid_ui.end_row();
+                                }
+                            }
+
+                            if palette_items.len() % COLUMNS != 0 {
+                                grid_ui.end_row();
+                            }
+                        });
+                    });
                 }
-                ExportStatus::Failure(message) => {
-                    ui.colored_label(egui::Color32::from_rgb(198, 40, 40), message);
+                if let Some(path) = state.current_file_path.as_ref() {
+                    ui.separator();
+                    ui.label(format!("Current map: {}", path.display()));
                 }
-            }
-        }
-    });
+
+                if let Some(status) = state.last_export_status.as_ref() {
+                    ui.separator();
+                    match status {
+                        ExportStatus::Success(message) => {
+                            ui.colored_label(egui::Color32::from_rgb(56, 142, 60), message);
+                        }
+                        ExportStatus::Failure(message) => {
+                            ui.colored_label(egui::Color32::from_rgb(198, 40, 40), message);
+                        }
+                    }
+                }
+            });
+        });
 
     if let Some(task) = state.save_dialog_task.as_mut() {
         if task.is_finished() {

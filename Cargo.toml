@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = { version = "0.14", features = ["serialize", "exr"] }   # use latest stable if newer
-bevy_egui = "0.28.0"
+bevy = { version = "0.20.0", features = ["serialize", "exr"] }
+bevy_egui = { version = "0.43.1", default-features = false, features = ["default_fonts", "manage_clipboard", "render"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1.0.100"

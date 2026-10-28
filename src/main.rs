@@ -4,6 +4,8 @@ mod debug;
 mod editor;
 mod export;
 mod grid_visual;
+#[cfg(test)]
+mod headless_smoke;
 mod io;
 mod runtime;
 mod terrain;
@@ -23,8 +25,15 @@ use texture::TexturePlugin;
 use ui::UiPlugin;
 
 fn main() {
-    App::new()
-        .add_plugins((DefaultPlugins, EguiPlugin))
+    let mut app = App::new();
+    app.add_plugins(DefaultPlugins);
+    add_editor(&mut app);
+    app.run();
+}
+
+/// Everything the editor adds on top of Bevy's own plugins.
+fn add_editor(app: &mut App) {
+    app.add_plugins(EguiPlugin::default())
         .configure_sets(
             Update,
             terrain::TerrainMeshSet::Rebuild.before(terrain::TerrainMeshSet::Cleanup),
@@ -39,19 +48,17 @@ fn main() {
             ImageInspectorPlugin,
         ))
         .add_systems(Startup, setup_light)
-        .add_systems(Update, grid_visual::draw_grid)
-        // .add_systems(Update, material::fix_roughness_images_on_load)
-        .run();
+        .add_systems(Update, grid_visual::draw_grid);
+    // .add_systems(Update, material::fix_roughness_images_on_load)
 }
 
 fn setup_light(mut commands: Commands) {
-    commands.spawn(DirectionalLightBundle {
-        directional_light: DirectionalLight {
+    commands.spawn((
+        DirectionalLight {
             illuminance: 20_000.0,
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             ..default()
         },
-        transform: Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -1.2, -0.8, 0.0)),
-        ..default()
-    });
+        Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -1.2, -0.8, 0.0)),
+    ));
 }

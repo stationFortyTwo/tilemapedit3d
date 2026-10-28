@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
+use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
-use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{TextureDimension, TextureFormat};
 
 use crate::types::TileType;

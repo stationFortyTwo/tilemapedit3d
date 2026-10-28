@@ -1,15 +1,16 @@
 use bevy::asset::Asset;
+use bevy::asset::RenderAssetUsages;
+use bevy::image::{Image, ImageLoaderSettings};
 use bevy::math::Vec2;
+use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialPipelineKey, StandardMaterial};
 use bevy::prelude::*;
 use bevy::reflect::TypePath;
-use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{
-    AsBindGroup, Extent3d, RenderPipelineDescriptor, ShaderRef, ShaderType,
-    SpecializedMeshPipelineError, TextureDimension, TextureFormat, TextureUsages,
-    TextureViewDescriptor, TextureViewDimension,
+    AsBindGroup, Extent3d, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
+    TextureDimension, TextureFormat, TextureUsages, TextureViewDescriptor, TextureViewDimension,
 };
-use bevy::render::texture::{Image, ImageLoaderSettings};
+use bevy::shader::ShaderRef;
 
 use crate::types::TILE_SIZE;
 
@@ -115,19 +116,15 @@ impl Default for TerrainMaterialExtension {
 
 impl MaterialExtension for TerrainMaterialExtension {
     fn fragment_shader() -> ShaderRef {
-        "shaders/terrain_pbr_extension.wgsl".into()
-    }
-
-    fn deferred_fragment_shader() -> ShaderRef {
-        "shaders/terrain_pbr_extension.wgsl".into()
+        "shaders/terrain_pbr_extension.wesl".into()
     }
 
     fn specialize(
         _pipeline: &bevy::pbr::MaterialExtensionPipeline,
-        descriptor: &mut bevy::render::render_resource::RenderPipelineDescriptor,
-        _layout: &bevy::render::mesh::MeshVertexBufferLayoutRef,
+        descriptor: &mut RenderPipelineDescriptor,
+        _layout: &MeshVertexBufferLayoutRef,
         _key: bevy::pbr::MaterialExtensionKey<Self>,
-    ) -> Result<(), bevy::render::render_resource::SpecializedMeshPipelineError> {
+    ) -> Result<(), SpecializedMeshPipelineError> {
         descriptor.vertex.shader_defs.push("VERTEX_UVS_B".into());
         descriptor
             .fragment
@@ -238,7 +235,7 @@ pub fn load_terrain_material(
 }
 
 pub fn fix_roughness_images_on_load(
-    mut events: EventReader<AssetEvent<Image>>,
+    mut events: MessageReader<AssetEvent<Image>>,
     mut images: ResMut<Assets<Image>>,
     asset_server: Res<AssetServer>,
 ) {
@@ -264,11 +261,13 @@ pub fn fix_roughness_images_on_load(
                     // Downcast: grab red channel as f32 and rebuild buffer
                     let new_data: Vec<f32> = image
                         .data
+                        .as_deref()
+                        .unwrap_or_default()
                         .chunks_exact(16) // RGBA32F = 4 * f32 = 16 bytes
                         .map(|px| f32::from_le_bytes([px[0], px[1], px[2], px[3]])) // take red
                         .collect();
 
-                    image.data = bytemuck::cast_slice(&new_data).to_vec();
+                    image.data = Some(bytemuck::cast_slice(&new_data).to_vec());
                     image.texture_descriptor.format = TextureFormat::R32Float;
                     image.texture_descriptor.size.depth_or_array_layers = 1;
                     info!("Coerced roughness map {:?} to R32Float", handle);
@@ -281,7 +280,7 @@ pub fn fix_roughness_images_on_load(
         if let AssetEvent::LoadedWithDependencies { id } = event {
             if let Some(path) = asset_server.get_path(*id) {
                 if path.path().to_string_lossy().contains("roughness") {
-                    if let Some(image) = images.get_mut(*id) {
+                    if let Some(mut image) = images.get_mut(*id) {
                         match image.texture_descriptor.format {
                             TextureFormat::Rgba8UnormSrgb => {
                                 image.texture_descriptor.format = TextureFormat::Rgba8Unorm;
@@ -290,7 +289,10 @@ pub fn fix_roughness_images_on_load(
                                     "Roughness image format: {:?}",
                                     image.texture_descriptor.format
                                 );
-                                info!("First few bytes: {:?}", &image.data[..16]);
+                                info!(
+                                    "First few bytes: {:?}",
+                                    image.data.as_deref().map(|d| &d[..16.min(d.len())])
+                                );
                             }
                             _ => {}
                         }
@@ -326,7 +328,7 @@ pub fn create_texture_array_image(layers: &[&Image]) -> Option<Image> {
     let first = layers[0];
     let size = first.texture_descriptor.size;
     let format = first.texture_descriptor.format;
-    let layer_size = first.data.len();
+    let layer_size = first.data.as_ref().map_or(0, Vec::len);
 
     if layer_size == 0 {
         return None;
@@ -337,7 +339,7 @@ pub fn create_texture_array_image(layers: &[&Image]) -> Option<Image> {
         if image.texture_descriptor.size != size || image.texture_descriptor.format != format {
             return None;
         }
-        data.extend_from_slice(&image.data);
+        data.extend_from_slice(image.data.as_deref()?);
     }
 
     let mut array_image = Image::new(

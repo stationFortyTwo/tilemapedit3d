@@ -5,9 +5,7 @@ use crate::texture::registry::TerrainTextureRegistry;
 use crate::types::{TILE_SIZE, TileType};
 use bevy::asset::{AssetId, LoadState};
 use bevy::math::{UVec2, Vec2};
-use bevy::pbr::MaterialMeshBundle;
 use bevy::prelude::*;
-use bevy::render::texture::Image;
 
 pub struct RuntimePlugin;
 
@@ -52,13 +50,10 @@ fn setup_runtime_mesh(
     let splat_handle = images.add(splat_image);
     let entity = commands
         .spawn((
-            MaterialMeshBundle {
-                mesh: mesh.clone(),
-                material: material.clone(),
-                transform: Transform::default(),
-                visibility: Visibility::Visible,
-                ..default()
-            },
+            Mesh3d(mesh.clone()),
+            MeshMaterial3d(material.clone()),
+            Transform::default(),
+            Visibility::Visible,
             Name::new("RuntimeTerrain"),
         ))
         .id();
@@ -89,7 +84,7 @@ fn rebuild_runtime_mesh(
 
     let combined = terrain::build_combined_mesh(&state.map);
 
-    if let Some(existing) = meshes.get_mut(&runtime.mesh) {
+    if let Some(mut existing) = meshes.get_mut(&runtime.mesh) {
         *existing = combined;
     }
 }
@@ -107,11 +102,11 @@ fn generate_splat_map(
         return;
     };
 
-    let Some(image) = images.get_mut(&runtime_splat.handle) else {
+    let Some(mut image) = images.get_mut(&runtime_splat.handle) else {
         return;
     };
 
-    splatmap::write(&state.map, image);
+    splatmap::write(&state.map, &mut image);
     runtime_splat.size = UVec2::new(state.map.width.max(1), state.map.height.max(1));
 }
 
@@ -205,7 +200,7 @@ fn update_runtime_material(
         return;
     }
 
-    let Some(material) = materials.get_mut(&runtime.material) else {
+    let Some(mut material) = materials.get_mut(&runtime.material) else {
         *visibility = Visibility::Hidden;
         return;
     };

@@ -1,26 +1,24 @@
-#import bevy_pbr::{
+// WESL since Bevy 0.20: `#import`/`#ifdef` became `import ...;` and `@if(...)`,
+// and the hard-coded `@group(2)` became `constants::MATERIAL_BIND_GROUP`.
+// The shading itself is unchanged line for line from the WGSL it replaces.
+
+import bevy_pbr::render::{
     pbr_bindings,
     pbr_functions::alpha_discard,
     pbr_fragment::pbr_input_from_standard_material,
 };
 
-#ifdef PREPASS_PIPELINE
-#import bevy_pbr::{
-    prepass_io::{VertexOutput, FragmentOutput},
-    pbr_deferred_functions::deferred_output,
-};
-#else
-#import bevy_pbr::{
+// Forward only: the editor camera renders forward with no deferred prepass,
+// and any prepass uses the standard material's own shader, so this file is
+// never compiled for one. (The WGSL's deferred and meshlet branches were dead.)
+import bevy_pbr::render::{
     forward_io::{VertexOutput, FragmentOutput},
-    pbr_functions,
     pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
     pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT,
 };
-#endif
 
-#ifdef MESHLET_MESH_MATERIAL_PASS
-#import bevy_pbr::meshlet_visibility_buffer_resolve::resolve_vertex_output
-#endif
+@if(VISIBILITY_RANGE_DITHER)
+import bevy_pbr::render::pbr_functions::visibility_range_dither;
 
 struct TerrainMaterialExtension {
     uv_scale: f32,
@@ -37,36 +35,36 @@ struct TerrainMaterialExtension {
     _padding: vec2<f32>,
 }
 
-@group(2) @binding(100)
+@group(constants::MATERIAL_BIND_GROUP) @binding(100)
 var<uniform> terrain_material_extension: TerrainMaterialExtension;
 
-#ifdef TERRAIN_MATERIAL_EXTENSION_BASE_COLOR_ARRAY
-@group(2) @binding(101)
+@if(TERRAIN_MATERIAL_EXTENSION_BASE_COLOR_ARRAY) {
+@group(constants::MATERIAL_BIND_GROUP) @binding(101)
 var terrain_base_color_array: texture_2d_array<f32>;
-@group(2) @binding(102)
+@group(constants::MATERIAL_BIND_GROUP) @binding(102)
 var terrain_base_color_sampler: sampler;
-#endif
+}
 
-#ifdef TERRAIN_MATERIAL_EXTENSION_NORMAL_ARRAY
-@group(2) @binding(103)
+@if(TERRAIN_MATERIAL_EXTENSION_NORMAL_ARRAY) {
+@group(constants::MATERIAL_BIND_GROUP) @binding(103)
 var terrain_normal_array: texture_2d_array<f32>;
-@group(2) @binding(104)
+@group(constants::MATERIAL_BIND_GROUP) @binding(104)
 var terrain_normal_sampler: sampler;
-#endif
+}
 
-#ifdef TERRAIN_MATERIAL_EXTENSION_ROUGHNESS_ARRAY
-@group(2) @binding(105)
+@if(TERRAIN_MATERIAL_EXTENSION_ROUGHNESS_ARRAY) {
+@group(constants::MATERIAL_BIND_GROUP) @binding(105)
 var terrain_roughness_array: texture_2d_array<f32>;
-@group(2) @binding(106)
+@group(constants::MATERIAL_BIND_GROUP) @binding(106)
 var terrain_roughness_sampler: sampler;
-#endif
+}
 
-#ifdef TERRAIN_MATERIAL_EXTENSION_SPLAT_MAP
-@group(2) @binding(107)
+@if(TERRAIN_MATERIAL_EXTENSION_SPLAT_MAP) {
+@group(constants::MATERIAL_BIND_GROUP) @binding(107)
 var terrain_splat_map: texture_2d<f32>;
-@group(2) @binding(108)
+@group(constants::MATERIAL_BIND_GROUP) @binding(108)
 var terrain_splat_sampler: sampler;
-#endif
+}
 
 fn triplanar_sample(
     tex: texture_2d<f32>,
@@ -92,7 +90,7 @@ fn triplanar_sample(
     return x_tex * weights.x + y_tex * weights.y + z_tex * weights.z;
 }
 
-#ifdef TERRAIN_MATERIAL_EXTENSION_BASE_COLOR_ARRAY
+@if(TERRAIN_MATERIAL_EXTENSION_BASE_COLOR_ARRAY)
 fn triplanar_sample_layer(
     tex: texture_2d_array<f32>,
     samp: sampler,
@@ -121,9 +119,8 @@ fn triplanar_sample_layer(
 
     return x_tex * weights.x + y_tex * weights.y + z_tex * weights.z;
 }
-#endif
 
-#ifdef TERRAIN_MATERIAL_EXTENSION_NORMAL_ARRAY
+@if(TERRAIN_MATERIAL_EXTENSION_NORMAL_ARRAY)
 fn triplanar_sample_layer_normal(
     tex: texture_2d_array<f32>,
     samp: sampler,
@@ -184,9 +181,8 @@ fn triplanar_sample_layer_normal(
 
     return normalize(world_x * weights.x + world_y * weights.y + world_z * weights.z);
 }
-#endif
 
-#ifdef TERRAIN_MATERIAL_EXTENSION_ROUGHNESS_ARRAY
+@if(TERRAIN_MATERIAL_EXTENSION_ROUGHNESS_ARRAY)
 fn triplanar_sample_layer_scalar(
     tex: texture_2d_array<f32>,
     samp: sampler,
@@ -210,7 +206,6 @@ fn triplanar_sample_layer_scalar(
 
     return sample_x * weights.x + sample_y * weights.y + sample_z * weights.z;
 }
-#endif
 
 const MAX_TERRAIN_LAYERS: u32 = 4u;
 
@@ -284,21 +279,12 @@ fn decode_top_blend_mask(mask_bits: f32) -> vec4<f32> {
 
 @fragment
 fn fragment(
-#ifdef MESHLET_MESH_MATERIAL_PASS
-    @builtin(position) frag_coord: vec4<f32>,
-#else
     in: VertexOutput,
     @builtin(front_facing) is_front: bool,
-#endif
 ) -> FragmentOutput {
-#ifdef MESHLET_MESH_MATERIAL_PASS
-    let in = resolve_vertex_output(frag_coord);
-    let is_front = true;
-#endif
 
-#ifdef VISIBILITY_RANGE_DITHER
-    pbr_functions::visibility_range_dither(in.position, in.visibility_range_dither);
-#endif
+@if(VISIBILITY_RANGE_DITHER)
+    visibility_range_dither(in.position, in.visibility_range_dither);
 
     // Build PBR input (uses mesh UVs initially)
     var pbr_input = pbr_input_from_standard_material(in, is_front);
@@ -307,7 +293,7 @@ fn fragment(
     let scale = terrain_material_extension.uv_scale;
     var base_color = vec4<f32>(pbr_input.material.base_color.rgb, 1.0);
 
-#ifdef STANDARD_MATERIAL_BASE_COLOR_TEXTURE
+@if(STANDARD_MATERIAL_BASE_COLOR_TEXTURE)
     base_color = triplanar_sample(
         pbr_bindings::base_color_texture,
         pbr_bindings::base_color_sampler,
@@ -315,15 +301,16 @@ fn fragment(
         pbr_input.world_normal.xyz,
         scale,
     );
-#endif
 
-#ifdef TERRAIN_MATERIAL_EXTENSION_SPLAT_MAP
+@if(TERRAIN_MATERIAL_EXTENSION_SPLAT_MAP)
     var weights = textureSample(
         terrain_splat_map,
         terrain_splat_sampler,
         world_to_splat_uv(pbr_input.world_position.xyz),
     );
-#ifdef VERTEX_COLORS
+@if(!TERRAIN_MATERIAL_EXTENSION_SPLAT_MAP)
+    var weights = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+@if(TERRAIN_MATERIAL_EXTENSION_SPLAT_MAP && VERTEX_COLORS) {
     let is_top_face = abs(pbr_input.world_normal.y) >= 0.5;
     if (is_top_face && in.color.r < -1.5) {
         let mask = decode_top_blend_mask(in.color.g);
@@ -372,10 +359,7 @@ fn fragment(
             }
         }
     }
-#endif
-#else
-    var weights = vec4<f32>(0.0, 0.0, 0.0, 0.0);
-#endif
+}
 
     let available_layers = min(terrain_material_extension.layer_count, MAX_TERRAIN_LAYERS);
     var weight_total = weights.x + weights.y + weights.z + weights.w;
@@ -384,11 +368,10 @@ fn fragment(
         if (available_layers == 0u) {
             weights = vec4<f32>(1.0, 0.0, 0.0, 0.0);
         } else {
-#ifdef VERTEX_UVS_B
+@if(VERTEX_UVS_B)
             let fallback_source = in.uv_b.x;
-#else
+@if(!VERTEX_UVS_B)
             let fallback_source = 0.0;
-#endif
             let fallback_layer = clamp_layer_index(i32(round(fallback_source)), available_layers);
             weights = assign_weight(vec4<f32>(0.0, 0.0, 0.0, 0.0), u32(fallback_layer), 1.0);
         }
@@ -397,7 +380,7 @@ fn fragment(
         weights = weights / weight_total;
     }
 
-#ifdef TERRAIN_MATERIAL_EXTENSION_BASE_COLOR_ARRAY
+@if(TERRAIN_MATERIAL_EXTENSION_BASE_COLOR_ARRAY)
     if (available_layers > 0u) {
         var color_accum = vec3<f32>(0.0, 0.0, 0.0);
         var color_weight = 0.0;
@@ -423,9 +406,8 @@ fn fragment(
             base_color = vec4<f32>(color_accum / color_weight, 1.0);
         }
     }
-#endif
 
-#ifdef TERRAIN_MATERIAL_EXTENSION_NORMAL_ARRAY
+@if(TERRAIN_MATERIAL_EXTENSION_NORMAL_ARRAY)
     if (available_layers > 0u) {
         var normal_accum = vec3<f32>(0.0, 0.0, 0.0);
         var normal_weight = 0.0;
@@ -453,9 +435,8 @@ fn fragment(
             pbr_input.clearcoat_N = blended_normal;
         }
     }
-#endif
 
-#ifdef TERRAIN_MATERIAL_EXTENSION_ROUGHNESS_ARRAY
+@if(TERRAIN_MATERIAL_EXTENSION_ROUGHNESS_ARRAY)
     if (available_layers > 0u) {
         var roughness_accum = 0.0;
         var roughness_weight = 0.0;
@@ -486,14 +467,12 @@ fn fragment(
             pbr_input.material.perceptual_roughness = clamp(remapped, 0.045, 1.0);
         }
     }
-#endif
 
     if (abs(pbr_input.world_normal.y) < 0.5 && available_layers > 0u) {
-#ifdef VERTEX_UVS_B
+@if(VERTEX_UVS_B)
         let fallback_source = in.uv_b.x;
-#else
+@if(!VERTEX_UVS_B)
         let fallback_source = 0.0;
-#endif
         let top_layer_index = clamp_layer_index(i32(round(fallback_source)), available_layers);
         let seam_height = in.uv_b.y * terrain_material_extension.height_world_scale;
         let safe_blend = max(terrain_material_extension.cliff_blend_height, 0.0001);
@@ -504,7 +483,7 @@ fn fragment(
         var bottom_layer_index = top_layer_index;
         var has_bottom = false;
         var force_cliff = false;
-#ifdef VERTEX_COLORS
+@if(VERTEX_COLORS) {
         if (in.color.b > 0.5) {
             force_cliff = true;
         }
@@ -516,7 +495,7 @@ fn fragment(
             bottom_blend = clamp(1.0 - (bottom_delta / safe_blend), 0.0, 1.0);
             has_bottom = true;
         }
-#endif
+}
 
         var cliff_weight = max(1.0 - top_blend - bottom_blend, 0.0);
 
@@ -528,14 +507,12 @@ fn fragment(
 
         let wall_enabled = terrain_material_extension.wall_enabled == 1u;
         let wall_layer_index = i32(terrain_material_extension.wall_layer_index);
-#ifdef TERRAIN_MATERIAL_EXTENSION_NORMAL_ARRAY
+@if(TERRAIN_MATERIAL_EXTENSION_NORMAL_ARRAY)
         let wall_has_normal_map = terrain_material_extension.wall_has_normal == 1u;
-#endif
-#ifdef TERRAIN_MATERIAL_EXTENSION_ROUGHNESS_ARRAY
+@if(TERRAIN_MATERIAL_EXTENSION_ROUGHNESS_ARRAY)
         let wall_has_roughness_map = terrain_material_extension.wall_has_roughness == 1u;
-#endif
 
-#ifdef TERRAIN_MATERIAL_EXTENSION_BASE_COLOR_ARRAY
+@if(TERRAIN_MATERIAL_EXTENSION_BASE_COLOR_ARRAY) {
         var cliff_sample: vec4<f32>;
         if (wall_enabled) {
             cliff_sample = triplanar_sample_layer(
@@ -595,9 +572,9 @@ fn fragment(
         } else {
             base_color = vec4<f32>(cliff_sample.rgb, 1.0);
         }
-#endif
+}
 
-#ifdef TERRAIN_MATERIAL_EXTENSION_NORMAL_ARRAY
+@if(TERRAIN_MATERIAL_EXTENSION_NORMAL_ARRAY) {
         var cliff_normal: vec3<f32>;
         if (wall_enabled && wall_has_normal_map) {
             cliff_normal = triplanar_sample_layer_normal(
@@ -660,9 +637,9 @@ fn fragment(
             pbr_input.N = cliff_normal;
             pbr_input.clearcoat_N = cliff_normal;
         }
-#endif
+}
 
-#ifdef TERRAIN_MATERIAL_EXTENSION_ROUGHNESS_ARRAY
+@if(TERRAIN_MATERIAL_EXTENSION_ROUGHNESS_ARRAY) {
         var cliff_rough: f32;
         if (wall_enabled && wall_has_roughness_map) {
             cliff_rough = triplanar_sample_layer_scalar(
@@ -729,17 +706,20 @@ fn fragment(
             let remapped = mix(rough_min, rough_max, clamp(cliff_rough, 0.0, 1.0));
             pbr_input.material.perceptual_roughness = clamp(remapped, 0.045, 1.0);
         }
-#endif
+}
     }
 
-    pbr_input.material.base_color = alpha_discard(pbr_input.material, base_color);
+    // Bevy 0.20 takes the material's flags and cutoff rather than the struct.
+    pbr_input.material.base_color = alpha_discard(
+        pbr_input.material.flags,
+        pbr_input.material.alpha_cutoff,
+        base_color,
+    );
 
 
 
-#ifdef PREPASS_PIPELINE
-    let out = deferred_output(in, pbr_input);
-#else
     var out: FragmentOutput;
+    {
     if (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u {
         out.color = apply_pbr_lighting(pbr_input);
     } else {
@@ -748,27 +728,26 @@ fn fragment(
 
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
 
-#ifdef DEBUG_NORMALS
+@if(DEBUG_NORMALS)
     out.color = vec4<f32>(
         0.5 * (pbr_input.N.x + 1.0),
         0.5 * (pbr_input.N.y + 1.0),
         0.5 * (pbr_input.N.z + 1.0),
         1.0
     );
-#endif
 
 //    out.color = vec4<f32>(in.uv_b.x / 10.0, in.uv_b.y, 0.0, 1.0);
 
-#ifdef DEBUG_SPLAT
+@if(DEBUG_SPLAT) {
     let splat = textureSample(
         terrain_splat_map,
         terrain_splat_sampler,
         world_to_splat_uv(pbr_input.world_position.xyz),
     );
     out.color = vec4<f32>(splat.rgb, 1.0);
-#endif
+}
 
-#ifdef DEBUG_LAYER3
+@if(DEBUG_LAYER3) {
     let test = triplanar_sample_layer(
         terrain_base_color_array,
         terrain_base_color_sampler,
@@ -778,16 +757,15 @@ fn fragment(
         3   // test the rock layer index
     );
     out.color = vec4<f32>(test.rgb, 1.0);
-#endif
+}
 
-#ifdef DEBUG_ROUGHNESS
+@if(DEBUG_ROUGHNESS)
 if (terrain_material_extension.layer_count > 0u) {
     let max_layer = i32(terrain_material_extension.layer_count) - 1;
-    #ifdef VERTEX_UVS_B
+    @if(VERTEX_UVS_B)
     let layer_source = in.uv_b.x;
-    #else
+    @if(!VERTEX_UVS_B)
     let layer_source = 0.0;
-    #endif
     let layer_value = clamp(i32(round(layer_source)), 0, max_layer);
 
     // sample via triplanar (same path as shading)
@@ -803,10 +781,7 @@ if (terrain_material_extension.layer_count > 0u) {
     // show EXACT value Bevy reads: 0..1
     out.color = vec4<f32>(sampled, sampled, sampled, 1.0);
 }
-#endif
-
-
-#endif'
+}
 
     return out;
 }

@@ -4,7 +4,7 @@ A Bevy-powered tilemap editor that uses `bevy_egui` for its in-app UI. The app r
 
 ## Getting started
 
-1. Ensure you have the Rust toolchain installed (Rust 1.75+ recommended for current Bevy releases).
+1. Ensure you have the Rust toolchain installed. The editor is on Bevy 0.20, which needs Rust 1.97.1; `rust-toolchain.toml` pins it for rustup.
 2. Run the editor with:
    ```bash
    cargo run
@@ -27,8 +27,9 @@ We welcome contributions! A concise workflow:
 1. Fork or branch from `work` and create a feature branch for your change.
 2. Make focused commits with clear messages.
 3. Run `cargo fmt` and `cargo clippy -- -D warnings` to keep formatting and lints clean.
-4. Use `cargo run` to manually test interactions (painting, ramp rotation, loading/saving) before opening a PR.
-5. Open a pull request describing the change and any relevant repro steps.
+4. Run `cargo test`. `export_matches_pre_upgrade_golden_bytes` pins the `.tmemapdata` export byte-for-byte; re-bless it with `TILEMAPEDIT_BLESS=1 cargo test` only when the format is meant to change. `cargo test -- --ignored` boots the whole editor without a window on the GPU and checks the terrain shader compiles and renders.
+5. Use `cargo run` to manually test interactions (painting, ramp rotation, loading/saving) before opening a PR.
+6. Open a pull request describing the change and any relevant repro steps.
 
 ## Planned work
 
